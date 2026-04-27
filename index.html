@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kwichi Chat</title>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background-color: #d1d7db;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .chat-container {
+      width: 100%;
+      max-width: 400px;
+      height: 100vh;
+      background: #efeae2;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+
+    .header {
+      background: #075e54;
+      color: white;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: 500;
+    }
+
+    .chat-id {
+      background: #128C7E;
+      color: white;
+      font-size: 12px;
+      padding: 6px 12px;
+      text-align: center;
+    }
+
+    .chat-box {
+      flex: 1;
+      padding: 15px;
+      overflow-y: auto;
+      background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+      background-size: cover;
+    }
+
+    .message {
+      padding: 9px 13px;
+      border-radius: 8px;
+      max-width: 80%;
+      position: relative;
+      font-size: 15px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .sent {
+      align-self: flex-end;
+      background: #dcf8c6;
+      border-top-right-radius: 2px;
+    }
+
+    .received {
+      align-self: flex-start;
+      background: #ffffff;
+      border-top-left-radius: 2px;
+    }
+
+    .reply-box {
+      background: rgba(0,0,0,0.08);
+      padding: 6px 10px;
+      border-left: 4px solid #128C7E;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: #555;
+    }
+
+    .time {
+      font-size: 11px;
+      color: #888;
+      text-align: right;
+      margin-top: 3px;
+    }
+
+    .input-area {
+      background: #f0f0f0;
+      padding: 10px;
+    }
+
+    .reply-preview {
+      background: #e2e8f0;
+      padding: 8px 12px;
+      border-left: 4px solid #128C7E;
+      border-radius: 5px;
+      display: none;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .file-label {
+      font-size: 26px;
+      cursor: pointer;
+      padding: 5px;
+      color: #666;
+    }
+
+    input[type="file"] { display: none; }
+
+    textarea {
+      flex: 1;
+      border-radius: 20px;
+      padding: 10px 15px;
+      resize: none;
+      border: none;
+      height: 42px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .send-btn {
+      border: none;
+      border-radius: 50%;
+      width: 42px;
+      height: 42px;
+      background: #128C7E;
+      color: white;
+      cursor: pointer;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="chat-container">
+  <div class="header">
+    Kwichi Chat
+  </div>
+
+  <div class="chat-id" id="chatIdDisplay">
+    Chat ID: Loading...
+  </div>
+
+  <div class="chat-box" id="chatBox"></div>
+
+  <div class="input-area">
+    <!-- Reply Preview -->
+    <div class="reply-preview" id="replyPreview">
+      <span id="replyText"></span>
+      <button onclick="cancelReply()" style="background:none;border:none;font-size:18px;cursor:pointer;">✖</button>
+    </div>
+
+    <div class="input-row">
+      <label for="fileInput" class="file-label">📎</label>
+      <input type="file" id="fileInput" accept="image/*,video/*">
+      <textarea id="messageInput" placeholder="Andika ujumbe..."></textarea>
+      <button class="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCQEOs_sn8J2EP1SRPXuBhLsK_3NJVmD0-a",
+    authDomain: "kwichi-chat.firebaseapp.com",
+    projectId: "kwichi-chat",
+    storageBucket: "kwichi-chat.firebasestorage.app",
+    messagingSenderId: "869405917629",
+    appId: "1:869405917629:web:6d9731563c6422dba524d4",
+    measurementId: "G-PEHERNDD34"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const auth = firebase.auth();
+  const storage = firebase.storage();
+
+  let chatId;
+  let replyTo = null;
+
+  auth.signInAnonymously().then(() => {
+    chatId = new URLSearchParams(window.location.search).get('chat');
+    if (!chatId) {
+      chatId = "chat_" + Math.random().toString(36).substring(2, 15) + Date.now().toString(36).substring(2, 8);
+      window.history.replaceState({}, '', `?chat=${chatId}`);
+    }
+    document.getElementById("chatIdDisplay").textContent = "Chat ID: " + chatId;
+    loadMessages();
+  });
+
+  function loadMessages() {
+    db.collection("private_chats").doc(chatId).collection("messages")
+      .orderBy("timestamp")
+      .onSnapshot(snapshot => {
+        const chatBox = document.getElementById("chatBox");
+        chatBox.innerHTML = "";
+
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const div = document.createElement("div");
+          div.className = `message ${data.sender === "Video za Kwichi Kwichi" ? "sent" : "received"}`;
+
+          let html = "";
+          if (data.replyTo) {
+            html += `<div class="reply-box">↩ ${data.replyTo.text}</div>`;
+          }
+          html += data.text || "";
+          if (data.imageUrl) html += `<br><img src="${data.imageUrl}" style="max-width:100%;border-radius:5px;">`;
+          if (data.videoUrl) html += `<br><a href="${data.videoUrl}" target="_blank">🎬 Video</a>`;
+
+          div.innerHTML = html;
+          chatBox.appendChild(div);
+
+          // Bonyeza ujumbe ili u-reply
+          div.onclick = () => {
+            replyTo = { text: data.text };
+            document.getElementById("replyPreview").style.display = "flex";
+            document.getElementById("replyText").innerText = data.text.substring(0, 60) + "...";
+          };
+        });
+        chatBox.scrollTop = chatBox.scrollHeight;
+      });
+  }
+
+  async function sendMessage() {
+    const text = document.getElementById("messageInput").value.trim();
+    const file = document.getElementById("fileInput").files[0];
+
+    if (!text && !file) return;
+
+    let imageUrl = null;
+    let videoUrl = null;
+
+    if (file) {
+      const ref = storage.ref("media/" + Date.now() + file.name);
+      await ref.put(file);
+      const url = await ref.getDownloadURL();
+      if (file.type.startsWith("image/")) imageUrl = url;
+      else videoUrl = url;
+    }
+
+    await db.collection("private_chats").doc(chatId).collection("messages").add({
+      text: text,
+      sender: "Video za Kwichi Kwichi",
+      imageUrl: imageUrl,
+      videoUrl: videoUrl,
+      replyTo: replyTo,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    document.getElementById("messageInput").value = "";
+    document.getElementById("fileInput").value = "";
+    cancelReply();
+  }
+
+  function cancelReply() {
+    replyTo = null;
+    document.getElementById("replyPreview").style.display = "none";
+  }
+
+  document.getElementById('messageInput').addEventListener('keypress', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+</script>
+
+</body>
+    </html>
